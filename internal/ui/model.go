@@ -88,12 +88,22 @@ func New(root string, openFile string, th theme.Theme, ignore []string) Model {
 		docView:        newDocumentModel(),
 		theme:          th,
 		ignore:         ignore,
-		focus:          panelExplorer,
-		sidebarVisible: true,
+		focus:          focusOnStart(openFile),
+		// Launching with an explicit file means the user already knows what
+		// they want open — start on the document with the Explorer hidden
+		// (ctrl+b brings it back).
+		sidebarVisible: openFile == "",
 		help:           h,
 		filterInput:    fi,
 		openOnStart:    openFile,
 	}
+}
+
+func focusOnStart(openFile string) focusedPanel {
+	if openFile != "" {
+		return panelDocument
+	}
+	return panelExplorer
 }
 
 func (m Model) Init() tea.Cmd {
