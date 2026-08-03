@@ -5,7 +5,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const appTitle = "runmd"
+const appTitle = "yap"
 
 func (m Model) View() tea.View {
 	if m.tooSmall {

@@ -9,8 +9,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"runmd/internal/exec"
-	"runmd/internal/theme"
+	"yap/internal/exec"
+	"yap/internal/theme"
 )
 
 // consoleState is the ":" ad-hoc command run against the document's shared
@@ -121,7 +121,7 @@ func (d DocumentModel) scratchCmd() tea.Cmd {
 		return flashCmd("open a file first — the scratch buffer runs in its shell session")
 	}
 
-	f, err := os.CreateTemp("", "runmd-scratch-*.sh")
+	f, err := os.CreateTemp("", "yap-scratch-*.sh")
 	if err != nil {
 		return flashCmd("could not create scratch file: " + err.Error())
 	}

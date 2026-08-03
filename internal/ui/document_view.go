@@ -9,8 +9,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 
-	"runmd/internal/markdown"
-	"runmd/internal/theme"
+	"yap/internal/markdown"
+	"yap/internal/theme"
 )
 
 // render draws the Document panel: prose via Glamour, code blocks in their

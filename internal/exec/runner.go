@@ -150,7 +150,7 @@ func StartShell(dir string) (*ShellSession, error) {
 	// after) before returning — otherwise a Cancel() racing right after
 	// StartShell could fire before the trap is live and kill the session on
 	// its very first use.
-	initMarker := fmt.Sprintf("__runmd_init_%x__", s.id)
+	initMarker := fmt.Sprintf("__yap_init_%x__", s.id)
 	if _, err := fmt.Fprintf(stdin, "trap ':' INT\nprintf '%s\\n'\n", initMarker); err != nil {
 		cancel()
 		_ = stdin.Close()
@@ -238,7 +238,7 @@ func (s *ShellSession) dispatchLoop() {
 // output until it sees this run's unique completion marker (appended after
 // the script), forwarding every other line to req.out.Lines.
 func (s *ShellSession) runOne(req *runRequest) {
-	marker := fmt.Sprintf("__runmd_%x_%d__", s.id, s.seq.Add(1))
+	marker := fmt.Sprintf("__yap_%x_%d__", s.id, s.seq.Add(1))
 
 	script := req.script
 	if !strings.HasSuffix(script, "\n") {

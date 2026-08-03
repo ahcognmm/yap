@@ -11,8 +11,8 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 
-	"runmd/internal/exec"
-	"runmd/internal/markdown"
+	"yap/internal/exec"
+	"yap/internal/markdown"
 )
 
 // runState is a runnable code block's execution status.

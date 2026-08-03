@@ -1,6 +1,6 @@
 package ui
 
-import "runmd/internal/fstree"
+import "yap/internal/fstree"
 
 // fileLoadedMsg carries the result of reading a Markdown file selected in
 // the Explorer.

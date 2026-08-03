@@ -1,4 +1,4 @@
-// Package ui implements the runmd top-level Bubble Tea model: an Explorer
+// Package ui implements the yap top-level Bubble Tea model: an Explorer
 // sidebar and a Document notebook pane, per DESIGN.md.
 package ui
 
@@ -11,8 +11,8 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/textinput"
 
-	"runmd/internal/markdown"
-	"runmd/internal/theme"
+	"yap/internal/markdown"
+	"yap/internal/theme"
 )
 
 const flashDuration = 3 * time.Second

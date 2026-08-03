@@ -1,4 +1,4 @@
-// Command runmd is a Jupyter-style TUI for Markdown: an Explorer file-tree
+// Command yap is a Jupyter-style TUI for Markdown: an Explorer file-tree
 // sidebar and a Document notebook pane with in-place, streamed shell
 // execution. See DESIGN.md for the full spec.
 package main
@@ -13,9 +13,9 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 
-	"runmd/internal/fstree"
-	"runmd/internal/theme"
-	"runmd/internal/ui"
+	"yap/internal/fstree"
+	"yap/internal/theme"
+	"yap/internal/ui"
 )
 
 func main() {
@@ -25,12 +25,12 @@ func main() {
 	)
 
 	root := &cobra.Command{
-		Use:   "runmd [path]",
-		Short: "runmd — a Jupyter-style TUI for Markdown",
+		Use:   "yap [path]",
+		Short: "yap — a Jupyter-style TUI for Markdown",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !isatty.IsTerminal(os.Stdout.Fd()) {
-				return fmt.Errorf("runmd requires an interactive terminal")
+				return fmt.Errorf("yap requires an interactive terminal")
 			}
 
 			path := "."
@@ -74,7 +74,7 @@ func main() {
 	root.Flags().StringSliceVar(&ignore, "ignore", nil, "additional names to ignore when scanning (comma-separated)")
 
 	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "runmd:", err)
+		fmt.Fprintln(os.Stderr, "yap:", err)
 		os.Exit(1)
 	}
 }

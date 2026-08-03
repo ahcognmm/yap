@@ -1,9 +1,10 @@
-# runmd
+# yap
 
 *A Jupyter-style TUI for Markdown. Your README can run now. Yes, that's a threat.*
 
-The repo is called `yap`. The module is called `runmd`. The binary is called `runmd`. Nobody
-remembers why it's called `yap` anymore. We've all made peace with it.
+It's called `yap` because your runbook has been talking a big game for years — pages and pages
+of confident instructions, none of which have ever been made to prove anything. Now the talk is
+executable. All yap, and finally some do.
 
 ## What is this
 
@@ -18,7 +19,7 @@ It's full of code blocks. Every time you need it, you do The Ritual:
 6. Realize you grabbed the leading `$`.
 7. Repeat 47 times, developing a mild personality disorder.
 
-`runmd` deletes steps 1 through 7. Open the directory, arrow to the block, hit Enter. It runs.
+`yap` deletes steps 1 through 7. Open the directory, arrow to the block, hit Enter. It runs.
 Output streams in underneath it. Exit code and wall-clock time show up in the corner. The
 Markdown file is never modified, because your documentation is documentation, not a scratchpad.
 
@@ -30,11 +31,11 @@ your repo doing nothing."
 ```sh
 git clone https://github.com/ahcognmm/yap
 cd yap
-go build -o runmd .
+go build -o yap .
 ```
 
 You will notice there is no `go install github.com/...` line. That's because the module is
-declared as plain `runmd`, not a URL, so the Go toolchain has no idea where this lives on the
+declared as plain `yap`, not a URL, so the Go toolchain has no idea where this lives on the
 internet and frankly neither do we. Build it from source like it's 2011. It takes four seconds.
 
 Needs Go 1.26+ and a real terminal. If you pipe it somewhere, it refuses to start and tells you
@@ -43,11 +44,11 @@ so, because a TUI writing escape codes into your `less` buffer helps nobody.
 ## Use
 
 ```sh
-runmd                      # current directory
-runmd ./docs               # some other directory
-runmd RUNBOOK.md           # straight to one file
-runmd --theme catppuccin   # for the pastel-inclined
-runmd --ignore dist,.venv  # on top of .git/node_modules/vendor/target
+yap                      # current directory
+yap ./docs               # some other directory
+yap RUNBOOK.md           # straight to one file
+yap --theme catppuccin   # for the pastel-inclined
+yap --ignore dist,.venv  # on top of .git/node_modules/vendor/target
 ```
 
 Left panel is the Explorer — a lazy file tree that only reads a directory when you actually

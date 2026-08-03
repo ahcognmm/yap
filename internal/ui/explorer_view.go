@@ -6,8 +6,8 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"runmd/internal/fstree"
-	"runmd/internal/theme"
+	"yap/internal/fstree"
+	"yap/internal/theme"
 )
 
 // render draws the Explorer panel, sized per the last setSize call — the

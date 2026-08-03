@@ -6,7 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/bubbles/v2/key"
 
-	"runmd/internal/fstree"
+	"yap/internal/fstree"
 )
 
 // ExplorerModel is the file-tree sidebar's state. It is a plain data model
