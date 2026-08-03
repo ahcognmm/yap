@@ -34,10 +34,6 @@ cd yap
 go build -o yap .
 ```
 
-You will notice there is no `go install github.com/...` line. That's because the module is
-declared as plain `yap`, not a URL, so the Go toolchain has no idea where this lives on the
-internet and frankly neither do we. Build it from source like it's 2011. It takes four seconds.
-
 Needs Go 1.26+ and a real terminal. If you pipe it somewhere, it refuses to start and tells you
 so, because a TUI writing escape codes into your `less` buffer helps nobody.
 
