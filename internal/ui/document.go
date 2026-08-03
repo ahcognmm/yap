@@ -64,6 +64,11 @@ type DocumentModel struct {
 
 	shell *exec.ShellSession
 
+	// console is the ad-hoc ":" command run in the shared shell — same
+	// session as the code blocks, so an `export` here is visible to every
+	// block run afterwards.
+	console consoleState
+
 	selected int
 	filter   string
 
@@ -118,6 +123,7 @@ func (d DocumentModel) isRunning() bool {
 // new file discards the replaced file's execution state entirely.
 func (d DocumentModel) loadDocument(path string, blocks []markdown.Block) DocumentModel {
 	d.closeShell()
+	d.console = consoleState{} // new file, new shell — old session output is meaningless
 	d.path = path
 	d.blocks = blocks
 	d.states = make([]blockState, len(blocks))
@@ -419,6 +425,26 @@ func (d DocumentModel) Update(msg tea.Msg) (DocumentModel, tea.Cmd) {
 			st.state = stateFail
 		} else {
 			st.state = stateSuccess
+		}
+		return d, nil
+
+	case sessionLineMsg:
+		if msg.gen != d.console.gen {
+			return d, nil
+		}
+		d.console.state = stateRunning
+		d.console.output = append(d.console.output, msg.line)
+		return d, consoleLineCmd(d.console.run, msg.gen)
+
+	case sessionDoneMsg:
+		if msg.gen != d.console.gen {
+			return d, nil
+		}
+		d.console.err = msg.err
+		if msg.err != nil || msg.exitCode != 0 {
+			d.console.state = stateFail
+		} else {
+			d.console.state = stateSuccess
 		}
 		return d, nil
 

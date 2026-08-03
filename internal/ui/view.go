@@ -15,6 +15,7 @@ func (m Model) View() tea.View {
 
 	header := m.renderHeader()
 	footer := m.renderFooter()
+	console := m.docView.renderConsole(m.theme, m.width)
 
 	var body string
 	switch {
@@ -30,7 +31,12 @@ func (m Model) View() tea.View {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, explorerBox, docBox)
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	parts := []string{header, body}
+	if console != "" {
+		parts = append(parts, console)
+	}
+	parts = append(parts, footer)
+	content := lipgloss.JoinVertical(lipgloss.Left, parts...)
 
 	if m.mode == modeHelp {
 		helpBox := m.renderHelp()
@@ -66,6 +72,11 @@ func (m Model) renderFooter() string {
 	if m.mode == modeFilter {
 		style := lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Width(m.width)
 		return style.Render(" /" + m.filterInput.View())
+	}
+
+	if m.mode == modeConsole {
+		style := lipgloss.NewStyle().Foreground(m.theme.TextPrimary).Width(m.width)
+		return style.Render(" :" + m.consoleInput.View())
 	}
 
 	text := m.flash

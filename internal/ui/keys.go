@@ -56,6 +56,8 @@ type DocumentKeyMap struct {
 	Cancel      key.Binding
 	Copy       key.Binding
 	Edit       key.Binding
+	Console    key.Binding
+	Scratch    key.Binding
 	Tab        key.Binding
 	ToggleTree key.Binding
 	Filter     key.Binding
@@ -79,6 +81,8 @@ func NewDocumentKeyMap() DocumentKeyMap {
 		Cancel:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
 		Copy:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy output")),
 		Edit:       key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
+		Console:    key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "run in session")),
+		Scratch:    key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit+run script")),
 		Tab:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch panel")),
 		ToggleTree: key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "toggle explorer")),
 		Filter:     key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
@@ -90,7 +94,7 @@ func NewDocumentKeyMap() DocumentKeyMap {
 }
 
 func (k DocumentKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Run, k.RunParallel, k.Edit, k.Tab, k.ToggleTree, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Run, k.Console, k.Edit, k.Tab, k.ToggleTree, k.Quit}
 }
 
 func (k DocumentKeyMap) FullHelp() [][]key.Binding {
@@ -98,6 +102,7 @@ func (k DocumentKeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.Top, k.Bottom},
 		{k.PageUp, k.PageDown},
 		{k.Run, k.RunParallel, k.Cancel, k.Copy, k.Edit},
+		{k.Console, k.Scratch},
 		{k.Tab, k.ToggleTree, k.Filter, k.Help, k.Quit},
 	}
 }

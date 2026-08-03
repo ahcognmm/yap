@@ -32,6 +32,9 @@ const (
 	modeBrowse mode = iota
 	modeHelp
 	modeFilter
+	// modeConsole is the ":" prompt for running an ad-hoc command in the
+	// open document's shared shell session.
+	modeConsole
 )
 
 const (
@@ -54,7 +57,8 @@ type Model struct {
 
 	help help.Model
 
-	filterInput textinput.Model
+	filterInput  textinput.Model
+	consoleInput textinput.Model
 
 	flash    string
 	flashGen int
@@ -83,6 +87,9 @@ func New(root string, openFile string, th theme.Theme, ignore []string) Model {
 	fi := textinput.New()
 	fi.Placeholder = "filter"
 
+	ci := textinput.New()
+	ci.Placeholder = "export FOO=bar"
+
 	return Model{
 		explorer:       newExplorerModel(abs, ignore),
 		docView:        newDocumentModel(),
@@ -95,6 +102,7 @@ func New(root string, openFile string, th theme.Theme, ignore []string) Model {
 		sidebarVisible: openFile == "",
 		help:           h,
 		filterInput:    fi,
+		consoleInput:   ci,
 		openOnStart:    openFile,
 	}
 }
@@ -128,6 +136,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case fileLoadedMsg:
 		return m.handleFileLoaded(msg)
 
+	case scratchEditedMsg:
+		var cmd tea.Cmd
+		m.docView, cmd = m.docView.runScratch(msg)
+		m.layout() // the console pane may have just claimed rows
+		return m, cmd
+
 	case editorFinishedMsg:
 		if msg.err != nil {
 			return m, flashCmd("editor exited with error: " + msg.err.Error())
@@ -138,9 +152,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.explorer.applyScan(msg)
 		return m, nil
 
-	case runStartedMsg, execLineMsg, execDoneMsg, runTickMsg:
+	case runStartedMsg, execLineMsg, execDoneMsg, runTickMsg, sessionLineMsg, sessionDoneMsg:
+		before := m.docView.consoleHeight()
 		var cmd tea.Cmd
 		m.docView, cmd = m.docView.Update(msg)
+		// Console output growing steals rows from the panels; re-layout so
+		// they shrink instead of being pushed off the bottom of the frame.
+		if m.docView.consoleHeight() != before {
+			m.layout()
+		}
 		return m, cmd
 
 	case footerFlashMsg:
@@ -162,6 +182,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Global keys first.
 	switch msg.String() {
 	case "ctrl+c":
+		if m.docView.consoleBusy() {
+			m.docView.cancelConsole()
+			return m, nil
+		}
 		if m.focus == panelDocument && m.docView.isRunning() {
 			return m, m.docView.cancelRunCmd()
 		}
@@ -198,6 +222,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.handleFilterKey(msg)
 	}
 
+	if m.mode == modeConsole {
+		return m.handleConsoleKey(msg)
+	}
+
 	if m.narrow && m.sidebarVisible {
 		switch msg.String() {
 		case "esc":
@@ -228,6 +256,10 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "/":
 		return m.startFilter()
+	case ":":
+		return m.startConsole()
+	case "ctrl+e":
+		return m, m.docView.scratchCmd()
 	}
 
 	if m.focus == panelExplorer {
@@ -272,7 +304,7 @@ func (m Model) handleFileLoaded(msg fileLoadedMsg) (tea.Model, tea.Cmd) {
 func (m *Model) layout() {
 	const headerHeight = 1
 	const footerHeight = 1
-	innerHeight := m.height - headerHeight - footerHeight
+	innerHeight := m.height - headerHeight - footerHeight - m.docView.consoleHeight()
 	if innerHeight < 0 {
 		innerHeight = 0
 	}

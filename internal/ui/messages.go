@@ -59,6 +59,27 @@ type runTickMsg struct {
 	gen      int
 }
 
+// sessionLineMsg is one streamed line from an ad-hoc ":" command run
+// directly in the document's shared shell.
+type sessionLineMsg struct {
+	gen  int
+	line string
+}
+
+// sessionDoneMsg reports an ad-hoc ":" command's exit.
+type sessionDoneMsg struct {
+	gen      int
+	exitCode int
+	err      error
+}
+
+// scratchEditedMsg reports that the $EDITOR launched for the session scratch
+// buffer exited — path is the temp file holding the script to run.
+type scratchEditedMsg struct {
+	path string
+	err  error
+}
+
 // runStartedMsg reports that a queued block has actually begun executing
 // in the shared shell (as opposed to still waiting behind a prior block).
 type runStartedMsg struct {
