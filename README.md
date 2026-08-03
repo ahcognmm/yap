@@ -148,7 +148,7 @@ concurrently and hoping for the best is not ordering, it's vibes.
 ## Project layout
 
 ```
-main.go                 cobra wiring, arg validation, "is this even a terminal"
+main.go                 CLI wiring, arg validation, "is this even a terminal"
 internal/exec/          the shell session, the markers, the trap, the regret
 internal/markdown/      goldmark -> ordered prose/code blocks
 internal/fstree/        lazy directory scanning, symlink cycle guard
@@ -181,5 +181,5 @@ transcended the filesystem. The code still does the thing it says, which is filt
 nodes only rather than recursively auto-expanding the tree.
 
 Built with [Bubble Tea](https://charm.land), [Glamour](https://github.com/charmbracelet/glamour),
-[goldmark](https://github.com/yuin/goldmark), and [Cobra](https://github.com/spf13/cobra).
+[goldmark](https://github.com/yuin/goldmark), and [urfave/cli](https://github.com/urfave/cli).
 Themes are the bundled dark default and Catppuccin Mocha, because it is a law.
