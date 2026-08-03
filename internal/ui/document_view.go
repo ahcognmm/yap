@@ -24,8 +24,8 @@ func (d DocumentModel) render(th theme.Theme, focused bool) string {
 	if d.hasDoc() {
 		title = pathBase(d.path)
 	}
-	if len(d.blocks) > 0 {
-		title += fmt.Sprintf(" ── %d/%d", d.selected+1, len(d.blocks))
+	if pos, total := d.codeBlockPosition(); total > 0 {
+		title += fmt.Sprintf(" ── %d/%d", pos, total)
 	}
 
 	border := lipgloss.NormalBorder()
@@ -138,7 +138,13 @@ func (d DocumentModel) renderCodeBlock(idx int, b markdown.Block, th theme.Theme
 		statusLabel = "queued…"
 	case stateRunning:
 		statusColor = th.StatusRunning
-		statusLabel = fmt.Sprintf("running… %s", formatElapsed(st.elapsed()))
+		// "⇉" marks a detached run — it's in its own shell, so it doesn't see
+		// the shared session's exports and isn't holding up the queue.
+		if st.detached {
+			statusLabel = fmt.Sprintf("⇉ running… %s", formatElapsed(st.elapsed()))
+		} else {
+			statusLabel = fmt.Sprintf("running… %s", formatElapsed(st.elapsed()))
+		}
 	case stateSuccess:
 		statusColor = th.StatusSuccess
 		statusLabel = fmt.Sprintf("✓ %s", formatElapsed(st.elapsed()))

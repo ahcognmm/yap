@@ -37,8 +37,9 @@ type blockState struct {
 	startedAt  time.Time
 	finishedAt time.Time
 
-	run *exec.Run
-	gen int // guards stale execLineMsg/execDoneMsg after cancel or rerun
+	run      *exec.Run
+	detached bool // ran via RunParallel, so it owns its own shell process
+	gen      int  // guards stale execLineMsg/execDoneMsg after cancel or rerun
 }
 
 // elapsed reports how long the block has been (or was) running, for display
@@ -130,15 +131,10 @@ func (d DocumentModel) loadDocument(path string, blocks []markdown.Block) Docume
 // nearest matching block, if any.
 func (d *DocumentModel) setFilter(q string) {
 	d.filter = q
-	if q == "" || d.matchesFilter(d.selected) {
+	if q == "" || d.selectable(d.selected) {
 		return
 	}
-	for i := range d.blocks {
-		if d.matchesFilter(i) {
-			d.selected = i
-			return
-		}
-	}
+	d.selectEdge(1)
 }
 
 func (d DocumentModel) matchesFilter(i int) bool {
@@ -160,17 +156,49 @@ func firstRunnableOrZero(blocks []markdown.Block) int {
 			return i
 		}
 	}
-	_ = blocks
 	return 0
 }
 
-// closeShell tears down the document's persistent shell, if any — called
-// when a different file is opened (new working directory, so a fresh shell
-// is warranted anyway) and at app quit.
+// selectable reports whether block i is a valid cursor target — only code
+// blocks are, since prose can't be run, copied, or acted on in any way.
+func (d DocumentModel) selectable(i int) bool {
+	if i < 0 || i >= len(d.blocks) {
+		return false
+	}
+	return d.blocks[i].Kind == markdown.KindCode && d.matchesFilter(i)
+}
+
+// codeBlockPosition returns the selected block's 1-based position among the
+// document's code blocks, and how many there are — prose is excluded, so the
+// header counter matches what the user can actually select.
+func (d DocumentModel) codeBlockPosition() (pos, total int) {
+	for i, b := range d.blocks {
+		if b.Kind != markdown.KindCode {
+			continue
+		}
+		total++
+		if i == d.selected {
+			pos = total
+		}
+	}
+	return pos, total
+}
+
+// closeShell tears down every process the document owns: its persistent
+// shell, plus any detached runs, which have their own processes and would
+// otherwise outlive the document (or the app) as orphans. Called when a
+// different file is opened (new working directory, so a fresh shell is
+// warranted anyway) and at app quit.
 func (d *DocumentModel) closeShell() {
 	if d.shell != nil {
 		d.shell.Close()
 		d.shell = nil
+	}
+	for i := range d.states {
+		st := &d.states[i]
+		if st.detached && st.run != nil {
+			st.run.Kill()
+		}
 	}
 }
 
@@ -181,15 +209,17 @@ func (d DocumentModel) handleKey(msg tea.KeyPressMsg) (DocumentModel, tea.Cmd) {
 	case key.Matches(msg, d.keys.Up):
 		d.moveSelection(-1)
 	case key.Matches(msg, d.keys.Top):
-		d.selected = 0
+		d.selectEdge(1)
 	case key.Matches(msg, d.keys.Bottom):
-		d.selected = len(d.blocks) - 1
+		d.selectEdge(-1)
 	case key.Matches(msg, d.keys.PageDown):
 		d.vp.PageDown()
 	case key.Matches(msg, d.keys.PageUp):
 		d.vp.PageUp()
 	case key.Matches(msg, d.keys.Run):
-		return d.runSelected()
+		return d.runSelected(false)
+	case key.Matches(msg, d.keys.RunParallel):
+		return d.runSelected(true)
 	case key.Matches(msg, d.keys.Copy):
 		return d, d.copySelectedOutputCmd()
 	case key.Matches(msg, d.keys.Edit):
@@ -216,36 +246,43 @@ func (d DocumentModel) editCmd() tea.Cmd {
 	})
 }
 
+// selectEdge jumps to the first (dir 1) or last (dir -1) selectable block.
+func (d *DocumentModel) selectEdge(dir int) {
+	start := 0
+	if dir < 0 {
+		start = len(d.blocks) - 1
+	}
+	for i := start; i >= 0 && i < len(d.blocks); i += dir {
+		if d.selectable(i) {
+			d.selected = i
+			return
+		}
+	}
+}
+
+// moveSelection steps to the next/previous selectable (code) block, skipping
+// prose entirely — prose can't be run or copied, so stopping on it would be a
+// dead keypress. Stays put if there's nothing further in that direction.
 func (d *DocumentModel) moveSelection(delta int) {
-	if len(d.blocks) == 0 {
-		return
-	}
-	if d.filter == "" {
-		n := d.selected + delta
-		if n < 0 {
-			n = 0
-		}
-		if n >= len(d.blocks) {
-			n = len(d.blocks) - 1
-		}
-		d.selected = n
-		return
-	}
-	// Filter active: step to the next/previous matching block, if any.
 	n := d.selected
 	for {
 		n += delta
 		if n < 0 || n >= len(d.blocks) {
 			return
 		}
-		if d.matchesFilter(n) {
+		if d.selectable(n) {
 			d.selected = n
 			return
 		}
 	}
 }
 
-func (d DocumentModel) runSelected() (DocumentModel, tea.Cmd) {
+// runSelected runs the selected block. With detached false it goes into the
+// document's shared shell, queuing behind anything already running there so
+// the block sees earlier blocks' exports and cwd. With detached true it gets
+// its own throwaway shell and starts immediately, running alongside whatever
+// else is in flight — at the cost of not sharing the session's state.
+func (d DocumentModel) runSelected(detached bool) (DocumentModel, tea.Cmd) {
 	if d.selected < 0 || d.selected >= len(d.blocks) {
 		return d, nil
 	}
@@ -254,13 +291,12 @@ func (d DocumentModel) runSelected() (DocumentModel, tea.Cmd) {
 		return d, nil
 	}
 
-	// Only one block runs in the shared shell at a time — if something else
-	// is already running, this block just queues behind it (like queuing
-	// another cell in a notebook kernel) rather than cancelling it. Only an
-	// explicit ctrl+c (cancelRunCmd) sends SIGINT into the shell — doing it
-	// implicitly here was racy: SIGINT could land while the shell was mid
-	// completion-marker write, breaking the marker protocol and leaving the
-	// block stuck at "running" forever even though it had finished.
+	// Blocks queued into the shared shell are never implicitly cancelled by
+	// running another one — only an explicit ctrl+c (cancelRunCmd) sends
+	// SIGINT. Doing it implicitly here was racy: SIGINT could land while the
+	// shell was mid completion-marker write, breaking the marker protocol and
+	// leaving the block stuck at "running" forever even though it had
+	// finished.
 	st := &d.states[d.selected]
 	st.gen++
 	st.state = stateQueued
@@ -272,19 +308,31 @@ func (d DocumentModel) runSelected() (DocumentModel, tea.Cmd) {
 	// with the true start once the shell actually reaches the block.
 	st.startedAt = time.Now()
 	st.finishedAt = time.Time{}
+	st.detached = detached
 
-	if d.shell == nil || d.shell.Closed() {
-		dir := filepath.Dir(d.path)
-		shell, err := exec.StartShell(dir)
+	dir := filepath.Dir(d.path)
+
+	var run *exec.Run
+	if detached {
+		r, err := exec.Detached(dir, block.Raw)
 		if err != nil {
 			st.state = stateFail
 			st.err = err
 			return d, nil
 		}
-		d.shell = shell
+		run = r
+	} else {
+		if d.shell == nil || d.shell.Closed() {
+			shell, err := exec.StartShell(dir)
+			if err != nil {
+				st.state = stateFail
+				st.err = err
+				return d, nil
+			}
+			d.shell = shell
+		}
+		run = d.shell.Run(block.Raw)
 	}
-
-	run := d.shell.Run(block.Raw)
 	st.run = run
 
 	idx := d.selected
@@ -304,9 +352,23 @@ func runTickCmd(blockIdx, gen int) tea.Cmd {
 	})
 }
 
-// cancelRunCmd cancels the currently running (or queued) block, if any.
+// cancelRunCmd cancels every in-flight block: detached runs are signalled
+// individually since each owns its own process, and the shared shell is
+// interrupted once if anything is running in it.
 func (d DocumentModel) cancelRunCmd() tea.Cmd {
-	if d.shell != nil {
+	shared := false
+	for i := range d.states {
+		st := &d.states[i]
+		if st.state != stateRunning && st.state != stateQueued {
+			continue
+		}
+		if st.detached {
+			st.run.Cancel()
+		} else {
+			shared = true
+		}
+	}
+	if shared && d.shell != nil {
 		d.shell.Cancel()
 	}
 	return nil

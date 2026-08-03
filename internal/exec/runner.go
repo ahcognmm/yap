@@ -35,6 +35,32 @@ type Run struct {
 	Started chan struct{}
 	Lines   chan string
 	Done    chan Result
+
+	// Set only for a Detached run, which owns its own process and so can be
+	// cancelled independently of any ShellSession.
+	cancel context.CancelFunc
+	pgid   int
+}
+
+// Cancel interrupts a Detached run's process group. It is a no-op for a run
+// belonging to a ShellSession — cancel those via the session itself, so the
+// shell process survives to keep its accumulated state.
+func (r *Run) Cancel() {
+	if r.cancel == nil {
+		return
+	}
+	_ = syscall.Kill(-r.pgid, syscall.SIGINT)
+}
+
+// Kill terminates a Detached run's whole process group outright — for teardown
+// (document switch, quit), where a detached process must not outlive the app.
+// No-op for a ShellSession-owned run.
+func (r *Run) Kill() {
+	if r.cancel == nil {
+		return
+	}
+	_ = syscall.Kill(-r.pgid, syscall.SIGKILL)
+	r.cancel()
 }
 
 type runRequest struct {
@@ -251,6 +277,80 @@ func (s *ShellSession) runOne(req *runRequest) {
 	close(req.out.Lines)
 	req.out.Done <- Result{ExitCode: -1, Err: errors.New("shell session ended")}
 	close(req.out.Done)
+}
+
+// Detached runs script in its own throwaway shell process, concurrently with
+// whatever the document's shared ShellSession is doing. It's the escape hatch
+// from the shared shell's strict serialization: a long-running block (a dev
+// server, a watcher) can occupy its own process while the shared session stays
+// free for everything else.
+//
+// The trade-off is the mirror image of ShellSession's: a Detached run neither
+// sees nor contributes to the shared session's environment, since it's a
+// separate process with a fresh copy of the parent's env.
+//
+// The returned Run's Started channel is already closed — a detached run never
+// waits its turn.
+func Detached(dir, script string) (*Run, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cmd := exec.CommandContext(ctx, "sh", "-s")
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Stdin = strings.NewReader(script)
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+
+	if err := cmd.Start(); err != nil {
+		cancel()
+		pr.Close()
+		pw.Close()
+		return nil, err
+	}
+	pw.Close() // parent's copy, so pr sees EOF once the child exits
+
+	started := make(chan struct{})
+	close(started)
+	r := &Run{
+		Started: started,
+		Lines:   make(chan string, 256),
+		Done:    make(chan Result, 1),
+		cancel:  cancel,
+		pgid:    cmd.Process.Pid,
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			r.Lines <- scanner.Text()
+		}
+		pr.Close()
+		close(r.Lines)
+
+		err := cmd.Wait()
+		cancel()
+		res := Result{}
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case errors.As(err, &exitErr):
+			res.ExitCode = exitErr.ExitCode()
+		default:
+			res.ExitCode = -1
+			res.Err = err
+		}
+		r.Done <- res
+		close(r.Done)
+	}()
+
+	return r, nil
 }
 
 func nowUnixNano() int64 {

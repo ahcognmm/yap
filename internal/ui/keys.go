@@ -51,8 +51,9 @@ type DocumentKeyMap struct {
 	Down       key.Binding
 	PageUp     key.Binding
 	PageDown   key.Binding
-	Run        key.Binding
-	Cancel     key.Binding
+	Run         key.Binding
+	RunParallel key.Binding
+	Cancel      key.Binding
 	Copy       key.Binding
 	Edit       key.Binding
 	Tab        key.Binding
@@ -70,8 +71,12 @@ func NewDocumentKeyMap() DocumentKeyMap {
 		Down:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "select block")),
 		PageUp:     key.NewBinding(key.WithKeys("ctrl+u", "pgup"), key.WithHelp("ctrl+u", "scroll up")),
 		PageDown:   key.NewBinding(key.WithKeys("ctrl+d", "pgdown"), key.WithHelp("ctrl+d", "scroll down")),
-		Run:        key.NewBinding(key.WithKeys("enter", "r"), key.WithHelp("enter/r", "run")),
-		Cancel:     key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
+		Run: key.NewBinding(key.WithKeys("enter", "r"), key.WithHelp("enter/r", "run")),
+		// shift+enter needs the Kitty keyboard protocol to be distinguishable
+		// from plain enter, which not every terminal speaks — "R" is the
+		// always-available equivalent.
+		RunParallel: key.NewBinding(key.WithKeys("shift+enter", "R"), key.WithHelp("R", "run parallel")),
+		Cancel:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
 		Copy:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy output")),
 		Edit:       key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
 		Tab:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch panel")),
@@ -85,14 +90,14 @@ func NewDocumentKeyMap() DocumentKeyMap {
 }
 
 func (k DocumentKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Run, k.Edit, k.Tab, k.ToggleTree, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Run, k.RunParallel, k.Edit, k.Tab, k.ToggleTree, k.Quit}
 }
 
 func (k DocumentKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Top, k.Bottom},
 		{k.PageUp, k.PageDown},
-		{k.Run, k.Cancel, k.Copy, k.Edit},
+		{k.Run, k.RunParallel, k.Cancel, k.Copy, k.Edit},
 		{k.Tab, k.ToggleTree, k.Filter, k.Help, k.Quit},
 	}
 }
