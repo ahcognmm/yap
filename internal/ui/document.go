@@ -13,6 +13,7 @@ import (
 
 	"yap/internal/exec"
 	"yap/internal/markdown"
+	"yap/internal/theme"
 )
 
 // runState is a runnable code block's execution status.
@@ -72,16 +73,46 @@ type DocumentModel struct {
 	selected int
 	filter   string
 
-	vp   viewport.Model
-	keys DocumentKeyMap
+	// The rendered document lives in the viewport rather than being rebuilt
+	// during View(), so scrolling keys can act on real content — and so a
+	// keystroke doesn't pay for re-running Glamour over every prose block.
+	// offsets is each block's first line within that content (-1 when the
+	// block is hidden by the filter).
+	vp      viewport.Model
+	offsets []int
+	theme   theme.Theme
+	keys    DocumentKeyMap
 
 	width, height int
 }
 
-func newDocumentModel() DocumentModel {
+func newDocumentModel(th theme.Theme) DocumentModel {
 	return DocumentModel{
-		vp:   viewport.New(),
-		keys: NewDocumentKeyMap(),
+		vp:    viewport.New(),
+		theme: th,
+		keys:  NewDocumentKeyMap(),
+	}
+}
+
+// rebuild re-renders the document into the viewport. Call it after anything
+// that changes what the document looks like: the open file, the filter, the
+// selection (the selected block's border is thicker), block output, or width.
+func (d *DocumentModel) rebuild() {
+	if !d.hasDoc() {
+		d.vp.SetContent("")
+		d.offsets = nil
+		return
+	}
+	content, offsets := d.renderBlocks(d.theme, d.vp.Width())
+	d.offsets = offsets
+	d.vp.SetContent(content)
+}
+
+// scrollToSelected brings the selected block into view, for the block-jump
+// keys — plain scrolling deliberately leaves the selection where it is.
+func (d *DocumentModel) scrollToSelected() {
+	if d.selected >= 0 && d.selected < len(d.offsets) && d.offsets[d.selected] >= 0 {
+		d.vp.EnsureVisible(d.offsets[d.selected], 0, 0)
 	}
 }
 
@@ -104,6 +135,7 @@ func (d *DocumentModel) setSize(w, h int) {
 	}
 	d.vp.SetWidth(innerW)
 	d.vp.SetHeight(innerH)
+	d.rebuild() // content is width-wrapped, so a resize invalidates it
 }
 
 func (d DocumentModel) hasDoc() bool {
@@ -128,6 +160,7 @@ func (d DocumentModel) loadDocument(path string, blocks []markdown.Block) Docume
 	d.blocks = blocks
 	d.states = make([]blockState, len(blocks))
 	d.selected = firstRunnableOrZero(blocks)
+	d.rebuild()
 	d.vp.SetYOffset(0)
 	return d
 }
@@ -137,10 +170,11 @@ func (d DocumentModel) loadDocument(path string, blocks []markdown.Block) Docume
 // nearest matching block, if any.
 func (d *DocumentModel) setFilter(q string) {
 	d.filter = q
-	if q == "" || d.selectable(d.selected) {
-		return
+	if q != "" && !d.selectable(d.selected) {
+		d.selectEdge(1)
 	}
-	d.selectEdge(1)
+	d.rebuild()
+	d.scrollToSelected()
 }
 
 func (d DocumentModel) matchesFilter(i int) bool {
@@ -210,18 +244,29 @@ func (d *DocumentModel) closeShell() {
 
 func (d DocumentModel) handleKey(msg tea.KeyPressMsg) (DocumentModel, tea.Cmd) {
 	switch {
+	// j/k scroll the rendered document by a line, like any pager — they do
+	// not move the selection. Jumping between code blocks is n/N, so reading
+	// prose and choosing what to run stay separate motions.
 	case key.Matches(msg, d.keys.Down):
-		d.moveSelection(1)
+		d.vp.ScrollDown(1)
 	case key.Matches(msg, d.keys.Up):
+		d.vp.ScrollUp(1)
+	case key.Matches(msg, d.keys.NextBlock):
+		d.moveSelection(1)
+		d.rebuild()
+		d.scrollToSelected()
+	case key.Matches(msg, d.keys.PrevBlock):
 		d.moveSelection(-1)
+		d.rebuild()
+		d.scrollToSelected()
 	case key.Matches(msg, d.keys.Top):
-		d.selectEdge(1)
+		d.vp.GotoTop()
 	case key.Matches(msg, d.keys.Bottom):
-		d.selectEdge(-1)
+		d.vp.GotoBottom()
 	case key.Matches(msg, d.keys.PageDown):
-		d.vp.PageDown()
+		d.vp.HalfPageDown()
 	case key.Matches(msg, d.keys.PageUp):
-		d.vp.PageUp()
+		d.vp.HalfPageUp()
 	case key.Matches(msg, d.keys.Run):
 		return d.runSelected(false)
 	case key.Matches(msg, d.keys.RunParallel):
@@ -268,14 +313,16 @@ func (d *DocumentModel) selectEdge(dir int) {
 
 // moveSelection steps to the next/previous selectable (code) block, skipping
 // prose entirely — prose can't be run or copied, so stopping on it would be a
-// dead keypress. Stays put if there's nothing further in that direction.
+// dead keypress. Wraps around at either end, so n keeps cycling through the
+// document's blocks rather than dead-ending on the last one. Stays put if
+// there's nothing selectable at all (e.g. a filter that matches nothing).
 func (d *DocumentModel) moveSelection(delta int) {
+	if len(d.blocks) == 0 {
+		return
+	}
 	n := d.selected
-	for {
-		n += delta
-		if n < 0 || n >= len(d.blocks) {
-			return
-		}
+	for i := 0; i < len(d.blocks); i++ {
+		n = (n + delta + len(d.blocks)) % len(d.blocks)
 		if d.selectable(n) {
 			d.selected = n
 			return
@@ -324,6 +371,7 @@ func (d DocumentModel) runSelected(detached bool) (DocumentModel, tea.Cmd) {
 		if err != nil {
 			st.state = stateFail
 			st.err = err
+			d.rebuild()
 			return d, nil
 		}
 		run = r
@@ -333,6 +381,7 @@ func (d DocumentModel) runSelected(detached bool) (DocumentModel, tea.Cmd) {
 			if err != nil {
 				st.state = stateFail
 				st.err = err
+				d.rebuild()
 				return d, nil
 			}
 			d.shell = shell
@@ -343,6 +392,8 @@ func (d DocumentModel) runSelected(detached bool) (DocumentModel, tea.Cmd) {
 
 	idx := d.selected
 	gen := st.gen
+	d.rebuild()
+	d.scrollToSelected()
 	return d, tea.Batch(
 		waitStartedCmd(run, idx, gen),
 		readLineCmd(run, idx, gen),
@@ -397,6 +448,7 @@ func (d DocumentModel) Update(msg tea.Msg) (DocumentModel, tea.Cmd) {
 		}
 		st.state = stateRunning
 		st.startedAt = time.Now()
+		d.rebuild()
 		return d, runTickCmd(msg.blockIdx, msg.gen)
 
 	case execLineMsg:
@@ -408,6 +460,7 @@ func (d DocumentModel) Update(msg tea.Msg) (DocumentModel, tea.Cmd) {
 			return d, nil // stale, from a cancelled/replaced run
 		}
 		st.output = append(st.output, msg.line)
+		d.rebuild()
 		return d, readLineCmd(st.run, msg.blockIdx, msg.gen)
 
 	case execDoneMsg:
@@ -426,13 +479,21 @@ func (d DocumentModel) Update(msg tea.Msg) (DocumentModel, tea.Cmd) {
 		} else {
 			st.state = stateSuccess
 		}
+		d.rebuild()
 		return d, nil
 
 	case sessionLineMsg:
 		if msg.gen != d.console.gen {
 			return d, nil
 		}
-		d.console.state = stateRunning
+		// Only ever promote queued -> running. consoleLineCmd and
+		// consoleDoneCmd run concurrently in the same tea.Batch, so the done
+		// message can land before the last line; assigning stateRunning
+		// unconditionally here would drag a finished command back to
+		// "running…" forever.
+		if d.console.state == stateQueued {
+			d.console.state = stateRunning
+		}
 		d.console.output = append(d.console.output, msg.line)
 		return d, consoleLineCmd(d.console.run, msg.gen)
 
@@ -456,6 +517,7 @@ func (d DocumentModel) Update(msg tea.Msg) (DocumentModel, tea.Cmd) {
 		if msg.gen != st.gen || st.state != stateRunning {
 			return d, nil // stale tick from a cancelled/finished/replaced run
 		}
+		d.rebuild() // the elapsed-time label just ticked over
 		return d, runTickCmd(msg.blockIdx, msg.gen)
 	}
 	return d, nil

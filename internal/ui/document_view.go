@@ -56,15 +56,7 @@ func (d DocumentModel) render(th theme.Theme, focused bool) string {
 			Height(innerH).
 			Render("Open a file from the Explorer to get started.")
 	} else {
-		content, offsets := d.renderBlocks(th, innerW)
-		vp := d.vp
-		vp.SetWidth(innerW)
-		vp.SetHeight(innerH)
-		vp.SetContent(content)
-		if d.selected >= 0 && d.selected < len(offsets) && offsets[d.selected] >= 0 {
-			vp.EnsureVisible(offsets[d.selected], 0, 0)
-		}
-		body = vp.View()
+		body = d.vp.View()
 	}
 
 	// body is already sized to exactly innerW x innerH (vp.View() and the

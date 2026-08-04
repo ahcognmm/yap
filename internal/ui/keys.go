@@ -47,10 +47,12 @@ func (k ExplorerKeyMap) FullHelp() [][]key.Binding {
 
 // DocumentKeyMap is the Document panel's key.Map.
 type DocumentKeyMap struct {
-	Up         key.Binding
-	Down       key.Binding
-	PageUp     key.Binding
-	PageDown   key.Binding
+	Up          key.Binding
+	Down        key.Binding
+	NextBlock   key.Binding
+	PrevBlock   key.Binding
+	PageUp      key.Binding
+	PageDown    key.Binding
 	Run         key.Binding
 	RunParallel key.Binding
 	Cancel      key.Binding
@@ -69,10 +71,12 @@ type DocumentKeyMap struct {
 
 func NewDocumentKeyMap() DocumentKeyMap {
 	return DocumentKeyMap{
-		Up:         key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k/↑", "select block")),
-		Down:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "select block")),
-		PageUp:     key.NewBinding(key.WithKeys("ctrl+u", "pgup"), key.WithHelp("ctrl+u", "scroll up")),
-		PageDown:   key.NewBinding(key.WithKeys("ctrl+d", "pgdown"), key.WithHelp("ctrl+d", "scroll down")),
+		Up:        key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k/↑", "scroll up")),
+		Down:      key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "scroll down")),
+		NextBlock: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next block")),
+		PrevBlock: key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev block")),
+		PageUp:    key.NewBinding(key.WithKeys("ctrl+u", "pgup"), key.WithHelp("ctrl+u", "page up")),
+		PageDown:  key.NewBinding(key.WithKeys("ctrl+d", "pgdown"), key.WithHelp("ctrl+d", "page down")),
 		Run: key.NewBinding(key.WithKeys("enter", "r"), key.WithHelp("enter/r", "run")),
 		// shift+enter needs the Kitty keyboard protocol to be distinguishable
 		// from plain enter, which not every terminal speaks — "R" is the
@@ -94,13 +98,13 @@ func NewDocumentKeyMap() DocumentKeyMap {
 }
 
 func (k DocumentKeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Run, k.Console, k.Edit, k.Tab, k.ToggleTree, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.NextBlock, k.Run, k.Console, k.Edit, k.Tab, k.Quit}
 }
 
 func (k DocumentKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Top, k.Bottom},
-		{k.PageUp, k.PageDown},
+		{k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom},
+		{k.NextBlock, k.PrevBlock},
 		{k.Run, k.RunParallel, k.Cancel, k.Copy, k.Edit},
 		{k.Console, k.Scratch},
 		{k.Tab, k.ToggleTree, k.Filter, k.Help, k.Quit},

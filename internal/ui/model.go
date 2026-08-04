@@ -92,7 +92,7 @@ func New(root string, openFile string, th theme.Theme, ignore []string) Model {
 
 	return Model{
 		explorer:       newExplorerModel(abs, ignore),
-		docView:        newDocumentModel(),
+		docView:        newDocumentModel(th),
 		theme:          th,
 		ignore:         ignore,
 		focus:          focusOnStart(openFile),
