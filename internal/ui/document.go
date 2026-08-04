@@ -88,9 +88,10 @@ type DocumentModel struct {
 
 func newDocumentModel(th theme.Theme) DocumentModel {
 	return DocumentModel{
-		vp:    viewport.New(),
-		theme: th,
-		keys:  NewDocumentKeyMap(),
+		vp:      viewport.New(),
+		console: newConsoleState(),
+		theme:   th,
+		keys:    NewDocumentKeyMap(),
 	}
 }
 
@@ -155,7 +156,11 @@ func (d DocumentModel) isRunning() bool {
 // new file discards the replaced file's execution state entirely.
 func (d DocumentModel) loadDocument(path string, blocks []markdown.Block) DocumentModel {
 	d.closeShell()
-	d.console = consoleState{} // new file, new shell — old session output is meaningless
+	// New file, new shell — old session output is meaningless. Keep the
+	// viewport's dimensions, which layout() already set for this terminal.
+	vp := d.console.vp
+	vp.SetContent("")
+	d.console = consoleState{vp: vp}
 	d.path = path
 	d.blocks = blocks
 	d.states = make([]blockState, len(blocks))
@@ -495,6 +500,7 @@ func (d DocumentModel) Update(msg tea.Msg) (DocumentModel, tea.Cmd) {
 			d.console.state = stateRunning
 		}
 		d.console.output = append(d.console.output, msg.line)
+		d.rebuildConsole()
 		return d, consoleLineCmd(d.console.run, msg.gen)
 
 	case sessionDoneMsg:

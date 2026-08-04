@@ -47,26 +47,27 @@ func (k ExplorerKeyMap) FullHelp() [][]key.Binding {
 
 // DocumentKeyMap is the Document panel's key.Map.
 type DocumentKeyMap struct {
-	Up          key.Binding
-	Down        key.Binding
-	NextBlock   key.Binding
-	PrevBlock   key.Binding
-	PageUp      key.Binding
-	PageDown    key.Binding
-	Run         key.Binding
-	RunParallel key.Binding
-	Cancel      key.Binding
-	Copy       key.Binding
-	Edit       key.Binding
-	Console    key.Binding
-	Scratch    key.Binding
-	Tab        key.Binding
-	ToggleTree key.Binding
-	Filter     key.Binding
-	Top        key.Binding
-	Bottom     key.Binding
-	Help       key.Binding
-	Quit       key.Binding
+	Up            key.Binding
+	Down          key.Binding
+	NextBlock     key.Binding
+	PrevBlock     key.Binding
+	PageUp        key.Binding
+	PageDown      key.Binding
+	Run           key.Binding
+	RunParallel   key.Binding
+	Cancel        key.Binding
+	Copy          key.Binding
+	Edit          key.Binding
+	Console       key.Binding
+	Scratch       key.Binding
+	ToggleConsole key.Binding
+	Tab           key.Binding
+	ToggleTree    key.Binding
+	Filter        key.Binding
+	Top           key.Binding
+	Bottom        key.Binding
+	Help          key.Binding
+	Quit          key.Binding
 }
 
 func NewDocumentKeyMap() DocumentKeyMap {
@@ -77,23 +78,24 @@ func NewDocumentKeyMap() DocumentKeyMap {
 		PrevBlock: key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev block")),
 		PageUp:    key.NewBinding(key.WithKeys("ctrl+u", "pgup"), key.WithHelp("ctrl+u", "page up")),
 		PageDown:  key.NewBinding(key.WithKeys("ctrl+d", "pgdown"), key.WithHelp("ctrl+d", "page down")),
-		Run: key.NewBinding(key.WithKeys("enter", "r"), key.WithHelp("enter/r", "run")),
+		Run:       key.NewBinding(key.WithKeys("enter", "r"), key.WithHelp("enter/r", "run")),
 		// shift+enter needs the Kitty keyboard protocol to be distinguishable
 		// from plain enter, which not every terminal speaks — "R" is the
 		// always-available equivalent.
-		RunParallel: key.NewBinding(key.WithKeys("shift+enter", "R"), key.WithHelp("R", "run parallel")),
-		Cancel:      key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
-		Copy:       key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy output")),
-		Edit:       key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
-		Console:    key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "run in session")),
-		Scratch:    key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit+run script")),
-		Tab:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch panel")),
-		ToggleTree: key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "toggle explorer")),
-		Filter:     key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
-		Top:        key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
-		Bottom:     key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
-		Help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Quit:       key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "quit")),
+		RunParallel:   key.NewBinding(key.WithKeys("shift+enter", "R"), key.WithHelp("R", "run parallel")),
+		Cancel:        key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "cancel")),
+		Copy:          key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "copy output")),
+		Edit:          key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "edit")),
+		Console:       key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "run in session")),
+		Scratch:       key.NewBinding(key.WithKeys("ctrl+e"), key.WithHelp("ctrl+e", "edit+run script")),
+		ToggleConsole: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "expand session log")),
+		Tab:           key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch panel")),
+		ToggleTree:    key.NewBinding(key.WithKeys("ctrl+b"), key.WithHelp("ctrl+b", "toggle explorer")),
+		Filter:        key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Top:           key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
+		Bottom:        key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
+		Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Quit:          key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "quit")),
 	}
 }
 
@@ -106,8 +108,50 @@ func (k DocumentKeyMap) FullHelp() [][]key.Binding {
 		{k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom},
 		{k.NextBlock, k.PrevBlock},
 		{k.Run, k.RunParallel, k.Cancel, k.Copy, k.Edit},
-		{k.Console, k.Scratch},
+		{k.Console, k.Scratch, k.ToggleConsole},
 		{k.Tab, k.ToggleTree, k.Filter, k.Help, k.Quit},
+	}
+}
+
+// ConsoleKeyMap is the expanded session log's key.Map. It's scroll-only —
+// every other action belongs to the panel the log was launched from, so the
+// footer says so rather than listing keys that do nothing here.
+type ConsoleKeyMap struct {
+	Up            key.Binding
+	Down          key.Binding
+	PageUp        key.Binding
+	PageDown      key.Binding
+	Top           key.Binding
+	Bottom        key.Binding
+	ToggleConsole key.Binding
+	Tab           key.Binding
+	Help          key.Binding
+	Quit          key.Binding
+}
+
+func NewConsoleKeyMap() ConsoleKeyMap {
+	return ConsoleKeyMap{
+		Up:            key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k/↑", "scroll up")),
+		Down:          key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j/↓", "scroll down")),
+		PageUp:        key.NewBinding(key.WithKeys("ctrl+u", "pgup"), key.WithHelp("ctrl+u", "page up")),
+		PageDown:      key.NewBinding(key.WithKeys("ctrl+d", "pgdown"), key.WithHelp("ctrl+d", "page down")),
+		Top:           key.NewBinding(key.WithKeys("g"), key.WithHelp("g", "top")),
+		Bottom:        key.NewBinding(key.WithKeys("G"), key.WithHelp("G", "bottom")),
+		ToggleConsole: key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("ctrl+o", "hide log")),
+		Tab:           key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "switch panel")),
+		Help:          key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Quit:          key.NewBinding(key.WithKeys("q", "esc"), key.WithHelp("q", "quit")),
+	}
+}
+
+func (k ConsoleKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Up, k.Down, k.PageDown, k.ToggleConsole, k.Tab, k.Quit}
+}
+
+func (k ConsoleKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down, k.PageUp, k.PageDown, k.Top, k.Bottom},
+		{k.ToggleConsole, k.Tab, k.Help, k.Quit},
 	}
 }
 

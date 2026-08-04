@@ -23,6 +23,9 @@ type focusedPanel int
 const (
 	panelExplorer focusedPanel = iota
 	panelDocument
+	// panelConsole is the expanded session log. It only enters the tab cycle
+	// while expanded — there's nothing to scroll in the collapsed peek.
+	panelConsole
 )
 
 // mode selects which full-screen overlay, if any, is showing.
@@ -56,6 +59,9 @@ type Model struct {
 	mode          mode
 
 	help help.Model
+	// consoleKeys lives here rather than on DocumentModel: the expanded log is
+	// its own focusable panel, so its footer hints are its own key.Map.
+	consoleKeys ConsoleKeyMap
 
 	filterInput  textinput.Model
 	consoleInput textinput.Model
@@ -101,6 +107,7 @@ func New(root string, openFile string, th theme.Theme, ignore []string) Model {
 		// (ctrl+b brings it back).
 		sidebarVisible: openFile == "",
 		help:           h,
+		consoleKeys:    NewConsoleKeyMap(),
 		filterInput:    fi,
 		consoleInput:   ci,
 		openOnStart:    openFile,
@@ -153,12 +160,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case runStartedMsg, execLineMsg, execDoneMsg, runTickMsg, sessionLineMsg, sessionDoneMsg:
-		before := m.docView.consoleHeight()
+		before := m.docView.consoleHeight(m.height)
 		var cmd tea.Cmd
 		m.docView, cmd = m.docView.Update(msg)
 		// Console output growing steals rows from the panels; re-layout so
 		// they shrink instead of being pushed off the bottom of the frame.
-		if m.docView.consoleHeight() != before {
+		if m.docView.consoleHeight(m.height) != before {
 			m.layout()
 		}
 		return m, cmd
@@ -247,11 +254,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab":
 		if m.docView.hasDoc() {
-			if m.focus == panelExplorer {
-				m.focus = panelDocument
-			} else {
-				m.focus = panelExplorer
-			}
+			m.focus = m.nextPanel()
 		}
 		return m, nil
 	case "/":
@@ -260,12 +263,47 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.startConsole()
 	case "ctrl+e":
 		return m, m.docView.scratchCmd()
+	case "ctrl+o":
+		m.docView.toggleConsole()
+		// Expanding hands focus straight to the log — the point of expanding is
+		// to read it, and it's the only size that scrolls. Collapsing or hiding
+		// gives focus back rather than leaving it on an invisible panel.
+		if m.docView.consoleIsExpanded() {
+			m.focus = panelConsole
+		} else if m.focus == panelConsole {
+			m.focus = panelDocument
+		}
+		m.layout()
+		return m, nil
 	}
 
-	if m.focus == panelExplorer {
+	switch m.focus {
+	case panelExplorer:
 		return m.updateExplorer(msg)
+	case panelConsole:
+		m.docView.scrollConsole(msg)
+		return m, nil
 	}
 	return m.updateDocument(msg)
+}
+
+// nextPanel cycles focus. The console joins the cycle only while expanded, and
+// the Explorer only while it's on screen — tabbing to a panel you can't see
+// would look like the key did nothing.
+func (m Model) nextPanel() focusedPanel {
+	order := []focusedPanel{panelDocument}
+	if m.sidebarVisible {
+		order = append([]focusedPanel{panelExplorer}, order...)
+	}
+	if m.docView.consoleIsExpanded() {
+		order = append(order, panelConsole)
+	}
+	for i, p := range order {
+		if p == m.focus {
+			return order[(i+1)%len(order)]
+		}
+	}
+	return order[0]
 }
 
 func (m Model) updateExplorer(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -304,7 +342,9 @@ func (m Model) handleFileLoaded(msg fileLoadedMsg) (tea.Model, tea.Cmd) {
 func (m *Model) layout() {
 	const headerHeight = 1
 	const footerHeight = 1
-	innerHeight := m.height - headerHeight - footerHeight - m.docView.consoleHeight()
+	consoleHeight := m.docView.consoleHeight(m.height)
+	m.docView.setConsoleSize(m.width, consoleHeight)
+	innerHeight := m.height - headerHeight - footerHeight - consoleHeight
 	if innerHeight < 0 {
 		innerHeight = 0
 	}

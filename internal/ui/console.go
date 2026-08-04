@@ -1,12 +1,15 @@
 package ui
 
 import (
+	"fmt"
+	"image/color"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
 
 	"yap/internal/exec"
@@ -18,13 +21,60 @@ import (
 // here is visible to every block run afterwards. That's the point: it lets
 // you set up secrets, PATH entries, or a virtualenv without editing the file.
 type consoleState struct {
-	cmd     string
-	output  []string
-	state   runState
-	err     error
-	run     *exec.Run
-	gen     int
-	visible bool // console pane shown below the document
+	cmd    string
+	output []string
+	state  runState
+	err    error
+	run    *exec.Run
+	gen    int
+	size   consoleSize
+
+	// vp holds the expanded pane's scrollback. A command's log can be far
+	// longer than any pane height, so expanded is a real scrollable box rather
+	// than a tail — the collapsed peek doesn't use this.
+	vp viewport.Model
+}
+
+func newConsoleState() consoleState {
+	vp := viewport.New()
+	vp.FillHeight = true
+	return consoleState{vp: vp}
+}
+
+// consoleSize is how much of the console log the pane shows. A command's
+// output is usually longer than the few lines that fit under the document, so
+// the pane cycles between a peek, the full log, and out of the way entirely.
+type consoleSize int
+
+const (
+	consoleHidden consoleSize = iota
+	consoleCollapsed
+	consoleExpanded
+)
+
+// next cycles the pane: collapsed → expanded → hidden → collapsed.
+func (s consoleSize) next() consoleSize {
+	switch s {
+	case consoleCollapsed:
+		return consoleExpanded
+	case consoleExpanded:
+		return consoleHidden
+	default:
+		return consoleCollapsed
+	}
+}
+
+// hint is the label shown in the pane header for what the toggle key will do
+// next, so the cycle is discoverable without opening help.
+func (s consoleSize) hint() string {
+	switch s {
+	case consoleCollapsed:
+		return "expand"
+	case consoleExpanded:
+		return "hide"
+	default:
+		return "show"
+	}
 }
 
 // runConsole executes cmd in the document's shared shell, starting the shell
@@ -39,7 +89,7 @@ func (d DocumentModel) runConsole(cmd string) (DocumentModel, tea.Cmd) {
 		if err != nil {
 			d.console.state = stateFail
 			d.console.err = err
-			d.console.visible = true
+			d.console.size = consoleCollapsed
 			return d, nil
 		}
 		d.shell = shell
@@ -50,7 +100,14 @@ func (d DocumentModel) runConsole(cmd string) (DocumentModel, tea.Cmd) {
 	d.console.output = nil
 	d.console.err = nil
 	d.console.state = stateQueued
-	d.console.visible = true
+	// A fresh command reopens the pane, but keeps an already-expanded one
+	// expanded — someone reading a long log doesn't want it collapsing under
+	// them on every follow-up command.
+	if d.console.size == consoleHidden {
+		d.console.size = consoleCollapsed
+	}
+	d.console.vp.GotoTop() // a fresh command starts at its own first line
+	d.rebuildConsole()
 
 	run := d.shell.Run(cmd)
 	d.console.run = run
@@ -199,22 +256,116 @@ func (d DocumentModel) consoleBusy() bool {
 	return d.console.state == stateRunning || d.console.state == stateQueued
 }
 
-// consoleMaxLines caps the console pane so a chatty command can't push the
-// document off the screen — older lines scroll out of the tail window.
-const consoleMaxLines = 6
+const (
+	// consoleCollapsedLines is the tail-peek height: enough to see a command
+	// worked without displacing the document.
+	consoleCollapsedLines = 6
+	// consoleMinDocRows is the floor the document keeps no matter how much the
+	// console asks for.
+	consoleMinDocRows = 8
+	// consoleExpandedMin is the smallest useful expanded box — two border rows
+	// plus a few lines of log. Below this, expanding isn't worth the rows.
+	consoleExpandedMin = 6
+)
+
+// collapsedLines is how many output lines the tail-peek shows.
+func (d DocumentModel) collapsedLines() int {
+	if n := len(d.console.output); n < consoleCollapsedLines {
+		return n
+	}
+	return consoleCollapsedLines
+}
 
 // consoleHeight is how many terminal rows the console pane occupies, so
 // layout can subtract them from the panels rather than letting the pane push
 // content past the bottom of the frame.
-func (d DocumentModel) consoleHeight() int {
-	if !d.console.visible {
+//
+// Expanded claims a fixed share of the terminal rather than shrinking to fit
+// its output: a one-line log in a one-line box is indistinguishable from the
+// collapsed peek, and the box is scrollable anyway, so a stable size is worth
+// more than a snug one.
+func (d DocumentModel) consoleHeight(termHeight int) int {
+	switch d.console.size {
+	case consoleHidden:
 		return 0
+	case consoleExpanded:
+		h := termHeight / 2
+		// -2 for the app's own header and footer rows.
+		if room := termHeight - 2 - consoleMinDocRows; h > room {
+			h = room
+		}
+		if h < consoleExpandedMin {
+			h = consoleExpandedMin
+		}
+		return h
+	default:
+		return d.collapsedLines() + 1 // + the ":" command echo line
 	}
-	n := len(d.console.output)
-	if n > consoleMaxLines {
-		n = consoleMaxLines
+}
+
+// setConsoleSize sizes the expanded pane's viewport. The +2/-2 are its border.
+func (d *DocumentModel) setConsoleSize(w, h int) {
+	innerW, innerH := w-2, h-2
+	if innerW < 0 {
+		innerW = 0
 	}
-	return n + 1 // + the ":" command echo line
+	if innerH < 0 {
+		innerH = 0
+	}
+	d.console.vp.SetWidth(innerW)
+	d.console.vp.SetHeight(innerH)
+	d.rebuildConsole()
+}
+
+// rebuildConsole refills the expanded pane's viewport with the command and its
+// output, and follows the tail while the command is still producing lines —
+// but only while the user hasn't scrolled away, so reading back through a long
+// log isn't yanked to the bottom by every new line.
+func (d *DocumentModel) rebuildConsole() {
+	follow := d.console.vp.AtBottom()
+	lines := make([]string, 0, len(d.console.output)+2)
+	for _, l := range strings.Split(d.console.cmd, "\n") {
+		lines = append(lines, "$ "+l)
+	}
+	lines = append(lines, d.console.output...)
+	d.console.vp.SetContent(strings.Join(lines, "\n"))
+	if follow {
+		d.console.vp.GotoBottom()
+	}
+}
+
+// toggleConsole cycles the pane's size. It's a no-op before any ":" command
+// has run — there'd be nothing to show.
+func (d *DocumentModel) toggleConsole() {
+	if d.console.cmd == "" {
+		return
+	}
+	d.console.size = d.console.size.next()
+}
+
+// consoleExpanded reports whether the pane is the big scrollable box, which is
+// the only size that can take focus.
+func (d DocumentModel) consoleIsExpanded() bool {
+	return d.console.size == consoleExpanded
+}
+
+// scrollConsole moves the expanded pane's viewport. Only the expanded box
+// scrolls — the collapsed peek is a fixed tail.
+func (d *DocumentModel) scrollConsole(msg tea.KeyPressMsg) {
+	switch msg.String() {
+	case "j", "down":
+		d.console.vp.ScrollDown(1)
+	case "k", "up":
+		d.console.vp.ScrollUp(1)
+	case "ctrl+d", "pgdown":
+		d.console.vp.HalfPageDown()
+	case "ctrl+u", "pgup":
+		d.console.vp.HalfPageUp()
+	case "g":
+		d.console.vp.GotoTop()
+	case "G":
+		d.console.vp.GotoBottom()
+	}
 }
 
 // consoleLabel collapses a command to one line for the pane's header — a
@@ -228,38 +379,93 @@ func consoleLabel(cmd string) string {
 	return cmd
 }
 
-// renderConsole draws the ad-hoc command, its status, and the tail of its
-// output beneath the panels. Empty string when no ":" command has been run.
-func (d DocumentModel) renderConsole(th theme.Theme, width int) string {
-	if !d.console.visible {
-		return ""
-	}
-
-	statusColor := th.TextMuted
-	status := "queued…"
+// consoleStatus is the console's state as a label and the color to draw it in.
+func (d DocumentModel) consoleStatus(th theme.Theme) (string, color.Color) {
 	switch d.console.state {
 	case stateRunning:
-		statusColor, status = th.StatusRunning, "running…"
+		return "running…", th.StatusRunning
 	case stateSuccess:
-		statusColor, status = th.StatusSuccess, "✓"
+		return "✓", th.StatusSuccess
 	case stateFail:
-		statusColor, status = th.StatusError, "✗"
 		if d.console.err != nil {
-			status = "✗ " + d.console.err.Error()
+			return "✗ " + d.console.err.Error(), th.StatusError
 		}
+		return "✗", th.StatusError
+	}
+	return "queued…", th.TextMuted
+}
+
+// renderConsole draws the session pane beneath the panels: a one-line tail
+// peek when collapsed, a bordered scrollable log box when expanded. Empty
+// string when hidden.
+func (d DocumentModel) renderConsole(th theme.Theme, width, termHeight int, focused bool) string {
+	switch d.console.size {
+	case consoleHidden:
+		return ""
+	case consoleExpanded:
+		return d.renderConsoleBox(th, width, termHeight, focused)
+	}
+
+	status, statusColor := d.consoleStatus(th)
+	shown := d.collapsedLines()
+	out := d.console.output
+	if len(out) > shown {
+		out = out[len(out)-shown:]
 	}
 
 	prompt := lipgloss.NewStyle().Foreground(th.AccentPrimary).Render(" :" + consoleLabel(d.console.cmd))
 	prompt += "  " + lipgloss.NewStyle().Foreground(statusColor).Render(status)
+	// Say how much of the log is off-screen, so a truncated tail doesn't read
+	// as the whole output, and name the key that reveals the rest.
+	meta := fmt.Sprintf("  [ctrl+o %s]", d.console.size.hint())
+	switch {
+	case len(d.console.output) == 0 && d.console.state != stateQueued:
+		// Plenty of useful session commands (export, cd) print nothing. Say so
+		// explicitly — otherwise an empty pane reads as a broken one.
+		meta = "  no output" + meta
+	case len(out) < len(d.console.output):
+		meta = fmt.Sprintf("  +%d more%s", len(d.console.output)-len(out), meta)
+	}
+	prompt += lipgloss.NewStyle().Foreground(th.TextMuted).Render(meta)
 
 	lines := []string{lipgloss.NewStyle().Width(width).Render(prompt)}
-	out := d.console.output
-	if len(out) > consoleMaxLines {
-		out = out[len(out)-consoleMaxLines:]
-	}
 	outStyle := lipgloss.NewStyle().Foreground(th.TextMuted).Width(width)
 	for _, l := range out {
 		lines = append(lines, outStyle.Render("  "+l))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// renderConsoleBox draws the expanded pane as a bordered panel matching the
+// Explorer and Document boxes — same border, same focus coloring — so the
+// session log reads as a third panel rather than an overlay.
+func (d DocumentModel) renderConsoleBox(th theme.Theme, width, termHeight int, focused bool) string {
+	border := lipgloss.NormalBorder()
+	borderColor := th.BorderPanelIdle
+	if focused {
+		border = lipgloss.ThickBorder()
+		borderColor = th.BorderPanelFocus
+	}
+
+	status, statusColor := d.consoleStatus(th)
+	title := " Session ── :" + consoleLabel(d.console.cmd) + " "
+
+	style := lipgloss.NewStyle().Border(border).BorderForeground(borderColor)
+	innerW := width - 2
+
+	body := d.console.vp.View()
+	if len(d.console.output) == 0 && d.console.state != stateQueued {
+		body = lipgloss.NewStyle().
+			Foreground(th.TextMuted).
+			Width(innerW).
+			Height(d.console.vp.Height()).
+			Render("  no output")
+	}
+
+	// The status and the ctrl+o hint ride the top border, the same way a code
+	// block's run status does — a separate header row would cost a line the
+	// log could use.
+	hint := fmt.Sprintf("[ctrl+o %s]", d.console.size.hint())
+	top := codeTopBorderLine(border, borderColor, width, title, status, statusColor, hint)
+	return top + "\n" + style.BorderTop(false).Render(body)
 }
