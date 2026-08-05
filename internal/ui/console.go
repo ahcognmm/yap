@@ -303,9 +303,15 @@ func (d DocumentModel) consoleHeight(termHeight int) int {
 	}
 }
 
-// setConsoleSize sizes the expanded pane's viewport. The +2/-2 are its border.
+// consolePad is the breathing room between the box border and the log, on each
+// side. Output butted straight against a border is the single biggest reason a
+// pane reads as cramped.
+const consolePad = 1
+
+// setConsoleSize sizes the expanded pane's viewport, leaving room for its
+// border (1 col/row each side) and consolePad.
 func (d *DocumentModel) setConsoleSize(w, h int) {
-	innerW, innerH := w-2, h-2
+	innerW, innerH := w-2-2*consolePad, h-2
 	if innerW < 0 {
 		innerW = 0
 	}
@@ -321,14 +327,37 @@ func (d *DocumentModel) setConsoleSize(w, h int) {
 // output, and follows the tail while the command is still producing lines —
 // but only while the user hasn't scrolled away, so reading back through a long
 // log isn't yanked to the bottom by every new line.
+//
+// Echo and output are styled differently on purpose: a script's own text and
+// what it printed are two different things, and undifferentiated they read as
+// one undifferentiated wall.
 func (d *DocumentModel) rebuildConsole() {
 	follow := d.console.vp.AtBottom()
+	th := d.theme
+
+	promptStyle := lipgloss.NewStyle().Foreground(th.AccentPrimary).Bold(true)
+	cmdStyle := lipgloss.NewStyle().Foreground(th.TextPrimary)
+	commentStyle := lipgloss.NewStyle().Foreground(th.TextMuted).Italic(true)
+	outStyle := lipgloss.NewStyle().Foreground(th.TextMuted)
+
 	lines := make([]string, 0, len(d.console.output)+2)
 	for _, l := range strings.Split(d.console.cmd, "\n") {
-		lines = append(lines, "$ "+l)
+		style := cmdStyle
+		if t := strings.TrimSpace(l); strings.HasPrefix(t, "#") {
+			style = commentStyle
+		}
+		lines = append(lines, promptStyle.Render("❯ ")+style.Render(l))
 	}
-	lines = append(lines, d.console.output...)
-	d.console.vp.SetContent(strings.Join(lines, "\n"))
+	if len(d.console.output) > 0 {
+		// A blank row is the cheapest possible separator, and unlike a rule it
+		// costs nothing horizontally and never collides with the border.
+		lines = append(lines, "")
+	}
+	for _, l := range d.console.output {
+		lines = append(lines, outStyle.Render("  "+l))
+	}
+
+	d.console.vp.SetContentLines(lines)
 	if follow {
 		d.console.vp.GotoBottom()
 	}
@@ -368,15 +397,28 @@ func (d *DocumentModel) scrollConsole(msg tea.KeyPressMsg) {
 	}
 }
 
-// consoleLabel collapses a command to one line for the pane's header — a
-// scratch-buffer script can be many lines, but the pane budgets exactly one
-// row for the echo.
+// consoleLabel collapses a command to one line for the pane's header. A
+// scratch-buffer script can be many lines, and its first ones are usually the
+// seeded comment header — skip to the first line that actually does something,
+// so the title names the command rather than a comment about it.
 func consoleLabel(cmd string) string {
-	first, _, multi := strings.Cut(cmd, "\n")
-	if multi {
-		return strings.TrimSpace(first) + " …"
+	lines := strings.Split(cmd, "\n")
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if i < len(lines)-1 {
+			return t + " …"
+		}
+		return t
 	}
-	return cmd
+	return strings.TrimSpace(consoleFirstLine(cmd))
+}
+
+func consoleFirstLine(cmd string) string {
+	first, _, _ := strings.Cut(cmd, "\n")
+	return first
 }
 
 // consoleStatus is the console's state as a label and the color to draw it in.
@@ -413,7 +455,8 @@ func (d DocumentModel) renderConsole(th theme.Theme, width, termHeight int, focu
 		out = out[len(out)-shown:]
 	}
 
-	prompt := lipgloss.NewStyle().Foreground(th.AccentPrimary).Render(" :" + consoleLabel(d.console.cmd))
+	prompt := lipgloss.NewStyle().Foreground(th.AccentPrimary).Bold(true).Render(" ❯ ")
+	prompt += lipgloss.NewStyle().Foreground(th.TextPrimary).Render(truncateMiddle(consoleLabel(d.console.cmd), consoleTitleMax))
 	prompt += "  " + lipgloss.NewStyle().Foreground(statusColor).Render(status)
 	// Say how much of the log is off-screen, so a truncated tail doesn't read
 	// as the whole output, and name the key that reveals the rest.
@@ -448,24 +491,62 @@ func (d DocumentModel) renderConsoleBox(th theme.Theme, width, termHeight int, f
 	}
 
 	status, statusColor := d.consoleStatus(th)
-	title := " Session ── :" + consoleLabel(d.console.cmd) + " "
+	// Same "Panel ── subject" shape the Document box uses for its filename.
+	title := " Session ── " + truncateMiddle(consoleLabel(d.console.cmd), consoleTitleMax) + " "
 
-	style := lipgloss.NewStyle().Border(border).BorderForeground(borderColor)
-	innerW := width - 2
+	style := lipgloss.NewStyle().
+		Border(border).
+		BorderForeground(borderColor).
+		Padding(0, consolePad)
 
 	body := d.console.vp.View()
 	if len(d.console.output) == 0 && d.console.state != stateQueued {
 		body = lipgloss.NewStyle().
 			Foreground(th.TextMuted).
-			Width(innerW).
+			Italic(true).
+			Width(d.console.vp.Width()).
 			Height(d.console.vp.Height()).
-			Render("  no output")
+			Render("no output")
 	}
 
-	// The status and the ctrl+o hint ride the top border, the same way a code
-	// block's run status does — a separate header row would cost a line the
-	// log could use.
-	hint := fmt.Sprintf("[ctrl+o %s]", d.console.size.hint())
+	// The status, scroll position, and ctrl+o hint ride the top border, the
+	// same way a code block's run status does — a separate header row would
+	// cost a line the log could use.
+	hint := lipgloss.NewStyle().Foreground(th.TextMuted).Render(d.consoleScrollLabel() + "[ctrl+o " + d.console.size.hint() + "]")
 	top := codeTopBorderLine(border, borderColor, width, title, status, statusColor, hint)
 	return top + "\n" + style.BorderTop(false).Render(body)
+}
+
+// consoleTitleMax caps the command shown in the box title. A scratch script's
+// first line can be arbitrarily long, and a title that eats the whole border
+// leaves no room for the status or the key hint.
+const consoleTitleMax = 40
+
+// consoleScrollLabel reports where the viewport sits in the log, so a pane
+// showing the middle of a long log doesn't read as showing all of it. Empty
+// when everything already fits.
+func (d DocumentModel) consoleScrollLabel() string {
+	if d.console.vp.TotalLineCount() <= d.console.vp.Height() {
+		return ""
+	}
+	if d.console.vp.AtTop() {
+		return "top  "
+	}
+	if d.console.vp.AtBottom() {
+		return "bot  "
+	}
+	return fmt.Sprintf("%d%%  ", int(d.console.vp.ScrollPercent()*100))
+}
+
+// truncateMiddle shortens s to at most max cells, keeping both ends — for a
+// command, the head says what ran and the tail says what it ran on, and tail
+// truncation alone would drop the latter.
+func truncateMiddle(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max || max < 5 {
+		return s
+	}
+	head := (max - 1) / 2
+	tail := max - 1 - head
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
 }
